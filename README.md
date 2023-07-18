@@ -12,7 +12,7 @@ on:
   pull_request_review:
     types: [submitted]
   pull_request:
-    types: [closed, reopened]
+    types: [closed, reopened, review_requested]
 permissions:
   pull-requests: read
 jobs:
@@ -23,6 +23,7 @@ jobs:
         - uses: actions/checkout@v3
           with:
             repository: jybp/github-slack-emoji-reaction
+            ref: 'v1.1.0'
         - uses: actions/setup-go@v4
           with:
             go-version: '1.20'
@@ -36,4 +37,5 @@ jobs:
             EMOJI_COMMENTED: speech_balloon
             EMOJI_CLOSED: no_entry
             EMOJI_MERGED: large_purple_square
+            EMOJI_REVIEW_REQUESTED: arrows_counterclockwise
 ```
