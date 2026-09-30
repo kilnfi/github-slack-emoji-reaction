@@ -5,7 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -43,10 +43,13 @@ func run() error {
 	if len(githubToken) == 0 {
 		return errors.New("GITHUB_TOKEN not set")
 	}
-	channelIDs := strings.Split(os.Getenv("SLACK_CHANNEL_IDS"), ",")
-	if len(channelIDs) == 0 {
+	// Validate the channel list explicitly: strings.Split never returns an
+	// empty slice, so a missing variable must be rejected before splitting.
+	rawChannelIDs := os.Getenv("SLACK_CHANNEL_IDS")
+	if len(strings.TrimSpace(rawChannelIDs)) == 0 {
 		return errors.New("SLACK_CHANNEL_IDS not set")
 	}
+	channelIDs := strings.Split(rawChannelIDs, ",")
 	ghEventPath := os.Getenv("GITHUB_EVENT_PATH")
 	if len(ghEventPath) == 0 {
 		return errors.New("GITHUB_EVENT_PATH not set")
@@ -57,7 +60,7 @@ func run() error {
 	}
 
 	if !verbose {
-		log.SetOutput(ioutil.Discard)
+		log.SetOutput(io.Discard)
 	}
 	log.Printf("%s:\n%s\n", ghEventPath, string(ghEvent))
 
