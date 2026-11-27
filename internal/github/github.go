@@ -45,6 +45,8 @@ func New(httpCLient *http.Client) API {
 }
 
 type PullRequestStatus struct {
+	// True when GitHub's review decision is APPROVED, as in the merge box. When the base branch
+	// requires no review, true when at least one reviewer's latest review is an approval.
 	Approved         bool
 	ChangesRequested bool
 	Commented        bool
@@ -125,5 +127,64 @@ func (api API) PullRequestStatus(ctx context.Context, owner, repo string, number
 			status.ChangesRequested = true
 		}
 	}
+	// One approval is not enough when CODEOWNERS or branch protection ask for more:
+	// trust GitHub's own decision, the one that blocks the merge button.
+	decision, err := api.reviewDecision(ctx, owner, repo, number)
+	if err != nil {
+		// Keep the per-reviewer status: the other emojis must still be updated.
+		log.Printf("review decision %s %s %d: %v\n", owner, repo, number, err)
+		return status, nil
+	}
+	log.Printf("review decision %s %s %d: %q\n", owner, repo, number, decision)
+	if decision != "" {
+		status.Approved = decision == reviewDecisionApproved
+	}
 	return status, nil
+}
+
+// reviewDecisionApproved is the review decision GitHub returns once every required review is in.
+const reviewDecisionApproved = "APPROVED"
+
+const reviewDecisionQuery = `query($owner: String!, $repo: String!, $number: Int!) {
+  repository(owner: $owner, name: $repo) {
+    pullRequest(number: $number) { reviewDecision }
+  }
+}`
+
+// reviewDecision fetches the pull request's review decision from the GraphQL API, the only API
+// that exposes it. GitHub computes it from CODEOWNERS and the branch protection rules.
+//
+//   - It is APPROVED, CHANGES_REQUESTED or REVIEW_REQUIRED.
+//   - It is empty when the base branch requires no review: GitHub returns null.
+func (api API) reviewDecision(ctx context.Context, owner, repo string, number int) (string, error) {
+	body := map[string]any{
+		"query":     reviewDecisionQuery,
+		"variables": map[string]any{"owner": owner, "repo": repo, "number": number},
+	}
+	// The relative URL resolves against the client's base URL: https://api.github.com/graphql.
+	req, err := api.client.NewRequest(http.MethodPost, "graphql", body)
+	if err != nil {
+		return "", fmt.Errorf("NewRequest(graphql): %w", err)
+	}
+	var resp struct {
+		Data struct {
+			Repository struct {
+				PullRequest struct {
+					ReviewDecision string `json:"reviewDecision"`
+				} `json:"pullRequest"`
+			} `json:"repository"`
+		} `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if _, err := api.client.Do(ctx, req, &resp); err != nil {
+		return "", fmt.Errorf("Do(graphql reviewDecision, %s, %s, %d): %w", owner, repo, number, err)
+	}
+	// GraphQL reports a failed query with status 200 and an errors list.
+	if len(resp.Errors) > 0 {
+		return "", fmt.Errorf("graphql reviewDecision(%s, %s, %d): %s",
+			owner, repo, number, resp.Errors[0].Message)
+	}
+	return resp.Data.Repository.PullRequest.ReviewDecision, nil
 }
